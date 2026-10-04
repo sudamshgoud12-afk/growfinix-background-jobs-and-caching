@@ -1,0 +1,184 @@
+package com.growfinx.task4;
+
+import jakarta.persistence.*;
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
+import org.springframework.context.annotation.Bean;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.scheduling.annotation.EnableScheduling;
+import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.stereotype.Service;
+import org.springframework.web.bind.annotation.*;
+
+import java.time.LocalDate;
+import java.util.List;
+
+@SpringBootApplication
+@EnableScheduling
+@org.springframework.cache.annotation.EnableCaching
+public class Task4Application {
+
+    public static void main(String[] args) {
+        SpringApplication.run(Task4Application.class, args);
+    }
+
+    // =========================
+    // ENTITY
+    // =========================
+
+    @Entity
+    @Table(name = "tour_bookings")
+    public static class Booking {
+
+        @Id
+        @GeneratedValue(strategy = GenerationType.IDENTITY)
+        private Long id;
+
+        private String customerName;
+
+        private String destination;
+
+        private LocalDate expiryDate;
+
+        public Booking() {
+        }
+
+        public Booking(
+                String customerName,
+                String destination,
+                LocalDate expiryDate) {
+
+            this.customerName = customerName;
+            this.destination = destination;
+            this.expiryDate = expiryDate;
+        }
+
+        public Long getId() {
+            return id;
+        }
+
+        public String getCustomerName() {
+            return customerName;
+        }
+
+        public String getDestination() {
+            return destination;
+        }
+
+        public LocalDate getExpiryDate() {
+            return expiryDate;
+        }
+    }
+
+    // =========================
+    // REPOSITORY
+    // =========================
+
+    public interface BookingRepository
+            extends JpaRepository<Booking, Long> {
+
+        List<Booking> findByExpiryDateBefore(
+                LocalDate date
+        );
+
+        List<Booking> findByDestination(
+                String destination
+        );
+    }
+
+    // =========================
+    // SERVICE
+    // =========================
+
+    @Service
+    public static class BookingService {
+
+        private final BookingRepository repository;
+
+        public BookingService(BookingRepository repository) {
+            this.repository = repository;
+        }
+
+        @Cacheable("popularDestinations")
+        public List<String> getPopularDestinations() {
+
+            System.out.println(
+                    "Fetching destinations from database..."
+            );
+
+            return List.of(
+                    "Goa",
+                    "Manali",
+                    "Hyderabad",
+                    "Kerala",
+                    "Jaipur"
+            );
+        }
+
+        @CacheEvict(
+                value = "popularDestinations",
+                allEntries = true
+        )
+        public Booking saveBooking(Booking booking) {
+
+            return repository.save(booking);
+        }
+
+        // Runs every day at midnight
+        @Scheduled(cron = "0 0 0 * * *")
+        public void removeExpiredBookings() {
+
+            LocalDate today = LocalDate.now();
+
+            List<Booking> expired =
+                    repository.findByExpiryDateBefore(today);
+
+            if (!expired.isEmpty()) {
+
+                repository.deleteAll(expired);
+
+                System.out.println(
+                        "Deleted " +
+                        expired.size() +
+                        " expired bookings."
+                );
+
+            } else {
+
+                System.out.println(
+                        "No expired bookings found."
+                );
+            }
+        }
+    }
+
+    // =========================
+    // CONTROLLER
+    // =========================
+
+    @RestController
+    @RequestMapping("/api/bookings")
+    public static class BookingController {
+
+        private final BookingService service;
+
+        public BookingController(BookingService service) {
+            this.service = service;
+        }
+
+        @PostMapping
+        public Booking create(
+                @RequestBody Booking booking) {
+
+            return service.saveBooking(booking);
+        }
+
+        @GetMapping("/popular-destinations")
+        public List<String> popularDestinations() {
+
+            return service.getPopularDestinations();
+        }
+    }
+}
